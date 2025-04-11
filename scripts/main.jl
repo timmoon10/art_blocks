@@ -23,7 +23,7 @@ function main()
     image = FileIO.rotr90(image)
 
     # Plot image
-    plotter = ArtBlocks.Plotter(image)
+    plotter = ArtBlocks.Plotter(image, [])
     ArtBlocks.plot(plotter)
 
 end

@@ -6,6 +6,8 @@ version = "0.0.1"
 ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
 FileIO = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
 GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
+ImageCore = "a09fc81d-aa75-5fe9-8630-4744c3626534"
 
 [compat]
 FileIO = "1.17.0"
+ImageCore = "0.10.5"
