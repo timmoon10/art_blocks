@@ -1,15 +1,8 @@
+module Plot
+
 import GLMakie
 
-mutable struct Rectangle
-
-    min_x::Int64
-    max_x::Int64
-    min_y::Int64
-    max_y::Int64
-
-    color::Vector{Float64}
-
-end
+import ..Geometry
 
 mutable struct Plotter
 
@@ -17,7 +10,7 @@ mutable struct Plotter
     image::Array
 
     # Rectangles
-    rectangles::Vector{Rectangle}
+    rectangles::Vector{Geometry.Rectangle}
 
 end
 
@@ -35,10 +28,10 @@ function plot(plotter::Plotter)
 
     for rect in plotter.rectangles
         coords = [
-            (rect.min_x, rect.min_y),
-            (rect.max_x, rect.min_y),
-            (rect.max_x, rect.max_y),
-            (rect.min_x, rect.max_y),
+            (rect.min_y, rect.min_x),
+            (rect.max_y, rect.min_x),
+            (rect.max_y, rect.max_x),
+            (rect.min_y, rect.max_x),
         ]
         color = GLMakie.RGBf(rect.color[1], rect.color[2], rect.color[3])
         GLMakie.poly!(coords, color=color)
@@ -52,3 +45,5 @@ function plot(plotter::Plotter)
     readline()
 
 end
+
+end  # module Plot

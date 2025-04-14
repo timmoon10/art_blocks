@@ -1,3 +1,5 @@
+module Color
+
 import ImageCore
 
 function image_to_color_space(
@@ -5,3 +7,5 @@ function image_to_color_space(
     )::Array{Float64, 3}
     return Float64.(ImageCore.channelview(image))
 end
+
+end  # module Color

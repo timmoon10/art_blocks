@@ -7,6 +7,9 @@ include(joinpath(root_dir, "src", "ArtBlocks.jl"))
 function parse_args()
     settings = ArgParse.ArgParseSettings()
     @ArgParse.add_arg_table settings begin
+        "--num-rectangles"
+            arg_type = Int
+            default = 64
         "image_file"
             default = joinpath(root_dir, "starry_night.jpg")
     end
@@ -22,9 +25,18 @@ function main()
     image = FileIO.load(args["image_file"])
     image = FileIO.rotr90(image)
 
+    # Initialize random rectangles
+    rectangles = ArtBlocks.Geometry.make_random_rectangles(
+        args["num-rectangles"],
+        0,
+        size(image, 2),
+        0,
+        size(image, 1),
+    )
+
     # Plot image
-    plotter = ArtBlocks.Plotter(image, [])
-    ArtBlocks.plot(plotter)
+    plotter = ArtBlocks.Plot.Plotter(image, rectangles)
+    ArtBlocks.Plot.plot(plotter)
 
 end
 
