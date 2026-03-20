@@ -1,5 +1,6 @@
 module Plot
 
+import Base.Threads
 import GLMakie
 
 import ..Geometry
@@ -75,6 +76,11 @@ end
 
 function animate!(plotter::Plotter)
 
+    if Threads.nthreads() < 2
+        @warn "animate! requires at least 2 threads for the command prompt. " *
+              "Restart Julia with `--threads N` (N ≥ 2), or the prompt will not respond."
+    end
+
     max_y = size(plotter.image, 1)
     max_x = size(plotter.image, 2)
 
@@ -97,16 +103,98 @@ function animate!(plotter::Plotter)
 
     screen = GLMakie.display(fig)
 
-    while isopen(screen)
-        Geometry.jiggle!(
-            plotter.rectangles, 0, max_x, 0, max_y,
-            step_size=plotter.step_size,
-        )
-        for (rect, obs) in zip(plotter.rectangles, coord_obs)
-            obs[] = rect_coords(rect)
-        end
-        sleep(plotter.frame_time)
+    # Animation state — only ever read/written by the animation loop below,
+    # so no locking needed.
+    is_paused::Bool = false
+
+    function print_help()
+        println("\nCommands")
+        println("--------")
+        println("help              show this message")
+        println("info              show current animation state")
+        println("pause             pause the animation")
+        println("unpause           resume the animation")
+        println("exit              close the window and exit")
     end
+
+    function print_info()
+        println("\nAnimation state")
+        println("---------------")
+        println("Paused:      ", is_paused)
+        println("Rectangles:  ", length(plotter.rectangles))
+        println("Step size:   ", plotter.step_size)
+        println("Frame time:  ", round(plotter.frame_time * 1000, digits=1), " ms")
+    end
+
+    function handle_command(line::String)
+        command = lowercase(strip(line))
+        if command == "help"
+            print_help()
+        elseif command == "info"
+            print_info()
+        elseif command == "pause"
+            is_paused = true
+            println("\nPaused.")
+        elseif command == "unpause"
+            is_paused = false
+            println("\nUnpaused.")
+        elseif command == "exit"
+            GLMakie.closeall()
+        else
+            println("\nUnknown command: \"$command\". Type \"help\" for a list of commands.")
+        end
+    end
+
+    print_help()
+
+    # Spawn a dedicated OS thread to read commands from stdin.
+    # readline() is a blocking syscall, so it must live on its own thread —
+    # if it ran on the animation thread it would freeze the animation.
+    loop_active = Threads.Atomic{Bool}(true)
+    command_channel = Channel{String}(32)
+    Threads.@spawn begin
+        while loop_active[]
+            # Brief pause at the top of each iteration. On the first iteration
+            # this lets print_help() finish before the prompt appears. On
+            # subsequent iterations it lets the animation loop process the
+            # previous command and print its response before the next prompt.
+            sleep(0.01)
+            print("Command: ")
+            line = readline()
+            isempty(strip(line)) || put!(command_channel, line)
+        end
+    end
+
+    # Animation loop. Frame work (jiggle + observable update) runs at
+    # frame_time intervals; command polling runs every 10 ms so that responses
+    # are printed within ~10 ms of the command arriving, before the reader thread
+    # wakes from its 10 ms sleep and prints the next prompt.
+    last_frame_time = time()
+    while isopen(screen) && loop_active[]
+
+        now = time()
+        if now - last_frame_time >= plotter.frame_time
+            if !is_paused
+                Geometry.jiggle!(
+                    plotter.rectangles, 0, max_x, 0, max_y,
+                    step_size=plotter.step_size,
+                )
+                for (rect, obs) in zip(plotter.rectangles, coord_obs)
+                    obs[] = rect_coords(rect)
+                end
+            end
+            last_frame_time = now
+        end
+
+        while isready(command_channel)
+            handle_command(take!(command_channel))
+        end
+
+        sleep(0.01)
+    end
+
+    loop_active[] = false
+    close(command_channel)
 
 end
 
