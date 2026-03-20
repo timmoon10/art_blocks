@@ -34,9 +34,9 @@ function main()
         size(image, 1),
     )
 
-    # Plot image
+    # Animate
     plotter = ArtBlocks.Plot.Plotter(image, rectangles)
-    ArtBlocks.Plot.plot(plotter)
+    ArtBlocks.Plot.animate!(plotter)
 
 end
 

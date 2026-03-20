@@ -9,7 +9,8 @@ mutable struct Rectangle
     min_y::Int
     max_y::Int
 
-    color::Vector{Float64}
+    color::NTuple{3, Float64}
+    alpha::Float64
 
 end
 
@@ -30,28 +31,52 @@ function make_random_rectangles(
     search_y = max(max_y - min_y - (dim_y - 1), 1)
     search_size = search_x * search_y
     if search_size < num_rectangles
-        throw("Too many rectangles for search space")
+        throw(ArgumentError("Too many rectangles for search space"))
     end
 
     # Randomly pick rectangle corners
     corners = Set{Tuple{Int, Int}}()
     sizehint!(corners, num_rectangles)
     while length(corners) < num_rectangles
-        rand = Random.rand(1:search_size)
-        corner = divrem(rand - 1, search_y)
+        idx = Random.rand(1:search_size)
+        corner = divrem(idx - 1, search_y)
         push!(corners, corner)
     end
 
     # Construct rectangles
     out = Vector{Rectangle}()
     sizehint!(out, num_rectangles)
-    for (min_x, min_y) in corners
-        color = Random.rand(Float64, 3)
-        rect = Rectangle(min_x, min_x + dim_x, min_y, min_y + dim_y, color)
+    for (cx, cy) in corners
+        color = (Random.rand(Float64), Random.rand(Float64), Random.rand(Float64))
+        rect = Rectangle(cx, cx + dim_x, cy, cy + dim_y, color, 0.5)
         push!(out, rect)
     end
 
     return out
+end
+
+function jiggle!(
+    rectangles::Vector{Rectangle},
+    min_x::Int,
+    max_x::Int,
+    min_y::Int,
+    max_y::Int;
+    step_size::Int = 5,
+    )
+
+    for rect in rectangles
+        width = rect.max_x - rect.min_x
+        height = rect.max_y - rect.min_y
+        dx = Random.rand(-step_size:step_size)
+        dy = Random.rand(-step_size:step_size)
+        new_min_x = clamp(rect.min_x + dx, min_x, max_x - width)
+        new_min_y = clamp(rect.min_y + dy, min_y, max_y - height)
+        rect.min_x = new_min_x
+        rect.max_x = new_min_x + width
+        rect.min_y = new_min_y
+        rect.max_y = new_min_y + height
+    end
+
 end
 
 end  # module Geometry
