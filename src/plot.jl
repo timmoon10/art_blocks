@@ -3,6 +3,7 @@ module Plot
 import Base.Threads
 import GLMakie
 
+import ..Color
 import ..Geometry
 
 mutable struct Plotter
@@ -84,6 +85,8 @@ function animate!(plotter::Plotter)
     max_y = size(plotter.image, 1)
     max_x = size(plotter.image, 2)
 
+    color_space = Color.image_to_color_space(plotter.image)
+
     fig = GLMakie.Figure()
     ax = GLMakie.Axis(fig[1, 1], aspect=GLMakie.DataAspect())
     GLMakie.hidespines!(ax)
@@ -99,6 +102,15 @@ function animate!(plotter::Plotter)
     color_obs = [GLMakie.Observable(GLMakie.RGBAf(r.color..., r.alpha)) for r in plotter.rectangles]
     for (obs, cobs) in zip(coord_obs, color_obs)
         GLMakie.poly!(ax, obs, color=cobs)
+    end
+
+    function update_colors_from_image!()
+        for (rect, cobs) in zip(plotter.rectangles, color_obs)
+            rect.color = Color.average_rect_color(
+                color_space, rect.min_x, rect.max_x, rect.min_y, rect.max_y,
+            )
+            cobs[] = GLMakie.RGBAf(rect.color..., rect.alpha)
+        end
     end
 
     screen = GLMakie.display(fig)
@@ -141,9 +153,9 @@ function animate!(plotter::Plotter)
             println("\nUnpaused.")
         elseif command == "reset"
             Geometry.reset!(plotter.rectangles, 0, max_x, 0, max_y)
-            for (rect, obs, cobs) in zip(plotter.rectangles, coord_obs, color_obs)
+            update_colors_from_image!()
+            for (rect, obs) in zip(plotter.rectangles, coord_obs)
                 obs[] = rect_coords(rect)
-                cobs[] = GLMakie.RGBAf(rect.color..., rect.alpha)
             end
             println("\nReset.")
         elseif command == "exit"
@@ -187,9 +199,9 @@ function animate!(plotter::Plotter)
                     plotter.rectangles, 0, max_x, 0, max_y,
                     step_size=plotter.step_size,
                 )
-                for (rect, obs, cobs) in zip(plotter.rectangles, coord_obs, color_obs)
+                update_colors_from_image!()
+                for (rect, obs) in zip(plotter.rectangles, coord_obs)
                     obs[] = rect_coords(rect)
-                    cobs[] = GLMakie.RGBAf(rect.color..., rect.alpha)
                 end
             end
             last_frame_time = now
