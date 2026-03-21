@@ -92,13 +92,13 @@ function animate!(plotter::Plotter)
     # Image is static — draw it once
     GLMakie.image!(ax, plotter.image)
 
-    # Each rectangle gets one Observable for its vertex positions.
-    # Updating the observable triggers GLMakie's rendering thread to redraw
+    # Each rectangle gets one Observable for its vertex positions and one for its color.
+    # Updating these observables triggers GLMakie's rendering thread to redraw
     # that polygon without touching any other scene state.
     coord_obs = [GLMakie.Observable(rect_coords(r)) for r in plotter.rectangles]
-    for (rect, obs) in zip(plotter.rectangles, coord_obs)
-        color = GLMakie.RGBAf(rect.color..., rect.alpha)
-        GLMakie.poly!(ax, obs, color=color)
+    color_obs = [GLMakie.Observable(GLMakie.RGBAf(r.color..., r.alpha)) for r in plotter.rectangles]
+    for (obs, cobs) in zip(coord_obs, color_obs)
+        GLMakie.poly!(ax, obs, color=cobs)
     end
 
     screen = GLMakie.display(fig)
@@ -114,6 +114,7 @@ function animate!(plotter::Plotter)
         println("info              show current animation state")
         println("pause             pause the animation")
         println("unpause           resume the animation")
+        println("reset             reset blocks to random positions, sizes, and colors")
         println("exit              close the window and exit")
     end
 
@@ -138,6 +139,13 @@ function animate!(plotter::Plotter)
         elseif command == "unpause"
             is_paused = false
             println("\nUnpaused.")
+        elseif command == "reset"
+            Geometry.reset!(plotter.rectangles, 0, max_x, 0, max_y)
+            for (rect, obs, cobs) in zip(plotter.rectangles, coord_obs, color_obs)
+                obs[] = rect_coords(rect)
+                cobs[] = GLMakie.RGBAf(rect.color..., rect.alpha)
+            end
+            println("\nReset.")
         elseif command == "exit"
             GLMakie.closeall()
         else
@@ -179,8 +187,9 @@ function animate!(plotter::Plotter)
                     plotter.rectangles, 0, max_x, 0, max_y,
                     step_size=plotter.step_size,
                 )
-                for (rect, obs) in zip(plotter.rectangles, coord_obs)
+                for (rect, obs, cobs) in zip(plotter.rectangles, coord_obs, color_obs)
                     obs[] = rect_coords(rect)
+                    cobs[] = GLMakie.RGBAf(rect.color..., rect.alpha)
                 end
             end
             last_frame_time = now
