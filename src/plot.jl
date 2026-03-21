@@ -93,7 +93,7 @@ function animate!(plotter::Plotter)
     GLMakie.hidedecorations!(ax)
 
     # Image is static — draw it once
-    GLMakie.image!(ax, plotter.image)
+    img_plot = GLMakie.image!(ax, plotter.image)
 
     # Each rectangle gets one Observable for its vertex positions and one for its color.
     # Updating these observables triggers GLMakie's rendering thread to redraw
@@ -127,6 +127,7 @@ function animate!(plotter::Plotter)
         println("pause             pause the animation")
         println("unpause           resume the animation")
         println("reset             reset blocks to random positions, sizes, and colors")
+        println("toggle image      show/hide the underlying image")
         println("exit              close the window and exit")
     end
 
@@ -151,6 +152,9 @@ function animate!(plotter::Plotter)
         elseif command == "unpause"
             is_paused = false
             println("\nUnpaused.")
+        elseif command == "toggle image"
+            img_plot.visible[] = !img_plot.visible[]
+            println("\nImage ", img_plot.visible[] ? "shown." : "hidden.")
         elseif command == "reset"
             Geometry.reset!(plotter.rectangles, 0, max_x, 0, max_y)
             update_colors_from_image!()
