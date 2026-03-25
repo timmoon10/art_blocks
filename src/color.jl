@@ -86,11 +86,17 @@ function average_rect_color(
     c1 = Statistics.mean(@view region[1, :, :])
     c2 = Statistics.mean(@view region[2, :, :])
     c3 = Statistics.mean(@view region[3, :, :])
-    return _to_srgb(csi, c1, c2, c3)
+    return from_colorspace(c1, c2, c3, colorspace(csi))
 end
 
-_to_srgb(::ColorSpaceImage{SRGB},  r, g, b) = (r, g, b)
-_to_srgb(::ColorSpaceImage{Oklab}, L, a, b) = oklab_to_srgb(L, a, b)
+# Convert an sRGB color into a given color space, and back.
+to_colorspace(r::Float64, g::Float64, b::Float64, ::SRGB)  = (r, g, b)
+to_colorspace(r::Float64, g::Float64, b::Float64, ::Oklab) = srgb_to_oklab(r, g, b)
+
+from_colorspace(c1::Float64, c2::Float64, c3::Float64, ::SRGB)  = (c1, c2, c3)
+from_colorspace(c1::Float64, c2::Float64, c3::Float64, ::Oklab) = oklab_to_srgb(c1, c2, c3)
+
+colorspace(::ColorSpaceImage{CS}) where CS = CS()
 
 colorspace_label(::ColorSpaceImage{SRGB})  = "srgb"
 colorspace_label(::ColorSpaceImage{Oklab}) = "oklab"

@@ -34,9 +34,9 @@ function main()
         size(image, 1),
     )
 
-    # Animate
+    # Anneal
     plotter = ArtBlocks.Plot.Plotter(image, rectangles)
-    ArtBlocks.Plot.animate!(plotter)
+    ArtBlocks.Plot.anneal!(plotter)
 
 end
 

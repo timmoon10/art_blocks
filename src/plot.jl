@@ -3,6 +3,7 @@ module Plot
 import Base.Threads
 import GLMakie
 
+import ..Anneal
 import ..Color
 import ..Geometry
 
@@ -222,6 +223,137 @@ function animate!(plotter::Plotter)
                 update_colors_from_image!()
                 for (rect, obs) in zip(plotter.rectangles, coord_obs)
                     obs[] = rect_coords(rect)
+                end
+            end
+            last_frame_time = now
+        end
+
+        while isready(command_channel)
+            handle_command(take!(command_channel))
+        end
+
+        sleep(0.01)
+    end
+
+    loop_active[] = false
+    close(command_channel)
+
+end
+
+function anneal!(plotter::Plotter, config::Anneal.AnnealConfig = Anneal.AnnealConfig())
+
+    if Threads.nthreads() < 2
+        @warn "anneal! requires at least 2 threads for the command prompt. " *
+              "Restart Julia with `--threads N` (N ≥ 2), or the prompt will not respond."
+    end
+
+    max_y = size(plotter.image, 1)
+    max_x = size(plotter.image, 2)
+
+    obj_csi = Color.image_to_color_space(plotter.image, config.color_space)
+    costs   = Anneal.init_costs(plotter.rectangles, obj_csi, config)
+
+    fig = GLMakie.Figure()
+    ax  = GLMakie.Axis(fig[1, 1], aspect=GLMakie.DataAspect())
+    GLMakie.hidespines!(ax)
+    GLMakie.hidedecorations!(ax)
+
+    img_plot  = GLMakie.image!(ax, plotter.image)
+    coord_obs = [GLMakie.Observable(rect_coords(r)) for r in plotter.rectangles]
+    color_obs = [GLMakie.Observable(GLMakie.RGBAf(r.color..., r.alpha)) for r in plotter.rectangles]
+    for (obs, cobs) in zip(coord_obs, color_obs)
+        GLMakie.poly!(ax, obs, color=cobs)
+    end
+
+    screen = GLMakie.display(fig)
+
+    is_paused::Bool = false
+
+    function print_help()
+        println("\nCommands")
+        println("--------")
+        println("help              show this message")
+        println("info              show current state")
+        println("pause             pause the annealing")
+        println("unpause           resume the annealing")
+        println("reset             reset blocks to random positions and colors")
+        println("toggle image      show/hide the underlying image")
+        println("exit              close the window and exit")
+    end
+
+    function print_info()
+        println("\nAnnealing state")
+        println("---------------")
+        println("Paused:            ", is_paused)
+        println("Rectangles:        ", length(plotter.rectangles))
+        println("Total reward:      ", round(-sum(costs), digits=2))
+        println("Color space:       ", Color.colorspace_label(obj_csi))
+        println("Sigma:             ", config.sigma)
+        println("Temperature:       ", config.temperature)
+        println("Steps/frame:       ", config.steps_per_frame)
+        println("Position step:     ", config.pos_step)
+        println("Size step:         ", config.size_step)
+        println("Color step:        ", config.color_step)
+    end
+
+    function handle_command(line::String)
+        command = lowercase(strip(line))
+        if command == "help"
+            print_help()
+        elseif command == "info"
+            print_info()
+        elseif command == "pause"
+            is_paused = true
+            println("\nPaused.")
+        elseif command == "unpause"
+            is_paused = false
+            println("\nUnpaused.")
+        elseif command == "toggle image"
+            img_plot.visible[] = !img_plot.visible[]
+            println("\nImage ", img_plot.visible[] ? "shown." : "hidden.")
+        elseif command == "reset"
+            Geometry.reset!(plotter.rectangles, 0, max_x, 0, max_y)
+            costs .= Anneal.init_costs(plotter.rectangles, obj_csi, config)
+            for (rect, obs, cobs) in zip(plotter.rectangles, coord_obs, color_obs)
+                obs[]  = rect_coords(rect)
+                cobs[] = GLMakie.RGBAf(rect.color..., rect.alpha)
+            end
+            println("\nReset.")
+        elseif command == "exit"
+            GLMakie.closeall()
+        else
+            println("\nUnknown command: \"$command\". Type \"help\" for a list of commands.")
+        end
+    end
+
+    print_help()
+
+    loop_active   = Threads.Atomic{Bool}(true)
+    command_channel = Channel{String}(32)
+    Threads.@spawn begin
+        while loop_active[]
+            sleep(0.01)
+            print("Command: ")
+            line = readline()
+            isempty(strip(line)) || put!(command_channel, line)
+        end
+    end
+
+    last_frame_time = time()
+    while isopen(screen) && loop_active[]
+
+        now = time()
+        if now - last_frame_time >= plotter.frame_time
+            if !is_paused
+                for _ in 1:config.steps_per_frame
+                    Anneal.anneal_step!(
+                        plotter.rectangles, obj_csi, config, costs,
+                        0, max_x, 0, max_y,
+                    )
+                end
+                for (rect, obs, cobs) in zip(plotter.rectangles, coord_obs, color_obs)
+                    obs[]  = rect_coords(rect)
+                    cobs[] = GLMakie.RGBAf(rect.color..., rect.alpha)
                 end
             end
             last_frame_time = now
