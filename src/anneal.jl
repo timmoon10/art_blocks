@@ -26,12 +26,57 @@ function AnnealConfig(;
     return AnnealConfig(color_space, sigma, pos_step, size_step, color_step, temperature, steps_per_frame)
 end
 
-# Block reward: sum of exp(-dist/σ) over all covered pixels, where dist is the
-# Euclidean distance in the objective color space between the block's solid color
-# and each image pixel. Larger blocks score more if they cover well; uncovered
-# pixels implicitly score zero. We store the negative as cost so that SA
+# ── Coverage map ─────────────────────────────────────────────────────────────
+
+# coverage_map[row, col] = number of blocks currently covering that pixel.
+function init_coverage_map(
+    rectangles::Vector{Geometry.Rectangle},
+    height::Int, width::Int,
+    )::Matrix{Int}
+    coverage_map = zeros(Int, height, width)
+    for rect in rectangles
+        _update_coverage!(coverage_map, rect, 1)
+    end
+    return coverage_map
+end
+
+# Rebuild coverage_map in-place (e.g. after a reset).
+function rebuild_coverage_map!(
+    coverage_map::Matrix{Int},
+    rectangles::Vector{Geometry.Rectangle},
+    )
+    fill!(coverage_map, 0)
+    for rect in rectangles
+        _update_coverage!(coverage_map, rect, 1)
+    end
+end
+
+function _update_coverage!(
+    coverage_map::Matrix{Int},
+    rect::Geometry.Rectangle,
+    delta::Int,
+    )
+    height, width = size(coverage_map)
+    row_range = clamp(rect.min_y + 1, 1, height):clamp(rect.max_y, 1, height)
+    col_range = clamp(rect.min_x + 1, 1, width):clamp(rect.max_x, 1, width)
+    @view(coverage_map[row_range, col_range]) .+= delta
+end
+
+# ── Objective ─────────────────────────────────────────────────────────────────
+
+# Block reward: sum over covered pixels of exp(-dist/σ) / coverage_count.
+# Dividing by coverage_count splits each pixel's reward among all blocks
+# covering it, discouraging overlap. Returns the negative as cost so that SA
 # minimization corresponds to maximizing total reward.
-function block_cost(rect::Geometry.Rectangle, csi::Color.ColorSpaceImage, sigma::Float64)::Float64
+#
+# The caller is responsible for removing this block from the coverage map
+# before calling, so the block does not compete with itself.
+function block_cost(
+    rect::Geometry.Rectangle,
+    csi::Color.ColorSpaceImage,
+    coverage_map::Matrix{Int},
+    sigma::Float64,
+    )::Float64
     bc     = Color.to_colorspace(rect.color..., Color.colorspace(csi))
     height = size(csi.data, 2)
     width  = size(csi.data, 3)
@@ -42,18 +87,23 @@ function block_cost(rect::Geometry.Rectangle, csi::Color.ColorSpaceImage, sigma:
         d1 = bc[1] - csi.data[1, i, j]
         d2 = bc[2] - csi.data[2, i, j]
         d3 = bc[3] - csi.data[3, i, j]
-        reward += exp(-sqrt(d1*d1 + d2*d2 + d3*d3) / sigma)
+        reward += exp(-sqrt(d1*d1 + d2*d2 + d3*d3) / sigma) / (coverage_map[i, j] + 1)
     end
     return -reward
 end
 
-function init_costs(
+# Total reward of the current configuration, computed with all blocks in the
+# coverage map. Intended for display; not used in the SA accept/reject step.
+function total_reward(
     rectangles::Vector{Geometry.Rectangle},
     csi::Color.ColorSpaceImage,
-    config::AnnealConfig,
-    )::Vector{Float64}
-    return [block_cost(r, csi, config.sigma) for r in rectangles]
+    coverage_map::Matrix{Int},
+    sigma::Float64,
+    )::Float64
+    return sum(-block_cost(r, csi, coverage_map, sigma) for r in rectangles)
 end
+
+# ── Jitter ────────────────────────────────────────────────────────────────────
 
 # Jitter a rectangle in-place and return the previous state for potential revert.
 function _jitter!(
@@ -100,31 +150,37 @@ function _revert!(rect::Geometry.Rectangle, saved)
     rect.min_x, rect.max_x, rect.min_y, rect.max_y, rect.color = saved
 end
 
-# Perform one SA step. Picks a random block, jitters it, and accepts or rejects
-# the move. costs is updated in-place for accepted moves.
-# Returns the index of the accepted block, or 0 if the move was rejected.
+# ── SA step ───────────────────────────────────────────────────────────────────
+
+# Perform one SA step. Picks a random block, removes it from the coverage map,
+# then evaluates old and new costs on the same footing (no self-competition).
+# Accepts or rejects the move and updates the coverage map accordingly.
+# Returns the index of the accepted block, or 0 if rejected.
 function anneal_step!(
     rectangles::Vector{Geometry.Rectangle},
     csi::Color.ColorSpaceImage,
     config::AnnealConfig,
-    costs::Vector{Float64},
+    coverage_map::Matrix{Int},
     min_x::Int, max_x::Int, min_y::Int, max_y::Int,
     )::Int
-    idx      = Random.rand(1:length(rectangles))
-    rect     = rectangles[idx]
-    old_cost = costs[idx]
+    idx  = Random.rand(1:length(rectangles))
+    rect = rectangles[idx]
+
+    _update_coverage!(coverage_map, rect, -1)
+    old_cost = block_cost(rect, csi, coverage_map, config.sigma)
     saved    = _jitter!(rect, min_x, max_x, min_y, max_y, config)
-    new_cost = block_cost(rect, csi, config.sigma)
+    new_cost = block_cost(rect, csi, coverage_map, config.sigma)
 
     delta  = new_cost - old_cost
     accept = delta <= 0 ||
         (config.temperature > 0 && Random.rand() < exp(-delta / config.temperature))
 
     if accept
-        costs[idx] = new_cost
+        _update_coverage!(coverage_map, rect, +1)
         return idx
     else
         _revert!(rect, saved)
+        _update_coverage!(coverage_map, rect, +1)
         return 0
     end
 end

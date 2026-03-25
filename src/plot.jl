@@ -250,8 +250,8 @@ function anneal!(plotter::Plotter, config::Anneal.AnnealConfig = Anneal.AnnealCo
     max_y = size(plotter.image, 1)
     max_x = size(plotter.image, 2)
 
-    obj_csi = Color.image_to_color_space(plotter.image, config.color_space)
-    costs   = Anneal.init_costs(plotter.rectangles, obj_csi, config)
+    obj_csi      = Color.image_to_color_space(plotter.image, config.color_space)
+    coverage_map = Anneal.init_coverage_map(plotter.rectangles, max_y, max_x)
 
     fig = GLMakie.Figure()
     ax  = GLMakie.Axis(fig[1, 1], aspect=GLMakie.DataAspect())
@@ -286,7 +286,7 @@ function anneal!(plotter::Plotter, config::Anneal.AnnealConfig = Anneal.AnnealCo
         println("---------------")
         println("Paused:            ", is_paused)
         println("Rectangles:        ", length(plotter.rectangles))
-        println("Total reward:      ", round(-sum(costs), digits=2))
+        println("Total reward:      ", round(Anneal.total_reward(plotter.rectangles, obj_csi, coverage_map, config.sigma), digits=2))
         println("Color space:       ", Color.colorspace_label(obj_csi))
         println("Sigma:             ", config.sigma)
         println("Temperature:       ", config.temperature)
@@ -313,7 +313,7 @@ function anneal!(plotter::Plotter, config::Anneal.AnnealConfig = Anneal.AnnealCo
             println("\nImage ", img_plot.visible[] ? "shown." : "hidden.")
         elseif command == "reset"
             Geometry.reset!(plotter.rectangles, 0, max_x, 0, max_y)
-            costs .= Anneal.init_costs(plotter.rectangles, obj_csi, config)
+            Anneal.rebuild_coverage_map!(coverage_map, plotter.rectangles)
             for (rect, obs, cobs) in zip(plotter.rectangles, coord_obs, color_obs)
                 obs[]  = rect_coords(rect)
                 cobs[] = GLMakie.RGBAf(rect.color..., rect.alpha)
@@ -347,7 +347,7 @@ function anneal!(plotter::Plotter, config::Anneal.AnnealConfig = Anneal.AnnealCo
             if !is_paused
                 for _ in 1:config.steps_per_frame
                     Anneal.anneal_step!(
-                        plotter.rectangles, obj_csi, config, costs,
+                        plotter.rectangles, obj_csi, config, coverage_map,
                         0, max_x, 0, max_y,
                     )
                 end
