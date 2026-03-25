@@ -18,6 +18,9 @@ mutable struct Plotter
     frame_time::Float64
     step_size::Int
 
+    # Color space used when averaging image pixels under each block
+    color_space_img::Any  # Color.ColorSpaceImage{<:Color.ColorSpace}
+
 end
 
 function Plotter(
@@ -26,7 +29,7 @@ function Plotter(
     frame_time::Float64 = 1/30,
     step_size::Int = 5,
     )::Plotter
-    return Plotter(image, rectangles, frame_time, step_size)
+    return Plotter(image, rectangles, frame_time, step_size, Color.image_to_color_space(image))
 end
 
 function draw_frame!(ax, plotter::Plotter)
@@ -85,8 +88,6 @@ function animate!(plotter::Plotter)
     max_y = size(plotter.image, 1)
     max_x = size(plotter.image, 2)
 
-    color_space = Color.image_to_color_space(plotter.image)
-
     fig = GLMakie.Figure()
     ax = GLMakie.Axis(fig[1, 1], aspect=GLMakie.DataAspect())
     GLMakie.hidespines!(ax)
@@ -107,7 +108,7 @@ function animate!(plotter::Plotter)
     function update_colors_from_image!()
         for (rect, cobs) in zip(plotter.rectangles, color_obs)
             rect.color = Color.average_rect_color(
-                color_space, rect.min_x, rect.max_x, rect.min_y, rect.max_y,
+                plotter.color_space_img, rect.min_x, rect.max_x, rect.min_y, rect.max_y,
             )
             cobs[] = GLMakie.RGBAf(rect.color..., rect.alpha)
         end
@@ -122,22 +123,24 @@ function animate!(plotter::Plotter)
     function print_help()
         println("\nCommands")
         println("--------")
-        println("help              show this message")
-        println("info              show current animation state")
-        println("pause             pause the animation")
-        println("unpause           resume the animation")
-        println("reset             reset blocks to random positions, sizes, and colors")
-        println("toggle image      show/hide the underlying image")
-        println("exit              close the window and exit")
+        println("help                   show this message")
+        println("info                   show current animation state")
+        println("pause                  pause the animation")
+        println("unpause                resume the animation")
+        println("reset                  reset blocks to random positions, sizes, and colors")
+        println("toggle image           show/hide the underlying image")
+        println("color space <name>     set averaging color space (srgb, oklab)")
+        println("exit                   close the window and exit")
     end
 
     function print_info()
         println("\nAnimation state")
         println("---------------")
-        println("Paused:      ", is_paused)
-        println("Rectangles:  ", length(plotter.rectangles))
-        println("Step size:   ", plotter.step_size)
-        println("Frame time:  ", round(plotter.frame_time * 1000, digits=1), " ms")
+        println("Paused:       ", is_paused)
+        println("Rectangles:   ", length(plotter.rectangles))
+        println("Step size:    ", plotter.step_size)
+        println("Frame time:   ", round(plotter.frame_time * 1000, digits=1), " ms")
+        println("Color space:  ", Color.colorspace_label(plotter.color_space_img))
     end
 
     function handle_command(line::String)
@@ -152,6 +155,19 @@ function animate!(plotter::Plotter)
         elseif command == "unpause"
             is_paused = false
             println("\nUnpaused.")
+        elseif startswith(command, "color space ")
+            name = strip(command[length("color space ")+1:end])
+            if name == "srgb"
+                plotter.color_space_img = Color.image_to_color_space(plotter.image, Color.SRGB())
+                update_colors_from_image!()
+                println("\nColor space set to srgb.")
+            elseif name == "oklab"
+                plotter.color_space_img = Color.image_to_color_space(plotter.image, Color.Oklab())
+                update_colors_from_image!()
+                println("\nColor space set to oklab.")
+            else
+                println("\nUnknown color space: \"$name\". Available: srgb, oklab.")
+            end
         elseif command == "toggle image"
             img_plot.visible[] = !img_plot.visible[]
             println("\nImage ", img_plot.visible[] ? "shown." : "hidden.")
