@@ -12,6 +12,7 @@ struct AnnealConfig
     color_step::Float64            # max color jitter per channel (0–1)
     temperature::Float64           # SA temperature; 0 = greedy hill-climbing
     steps_per_frame::Int           # SA steps to run between display updates
+    baseline_interval::Int         # SA steps between baseline recomputations; 0 disables
 end
 
 function AnnealConfig(;
@@ -22,8 +23,9 @@ function AnnealConfig(;
     color_step::Float64           = 0.05,
     temperature::Float64          = 0.0,
     steps_per_frame::Int          = 50,
+    baseline_interval::Int        = 50,
     )::AnnealConfig
-    return AnnealConfig(color_space, sigma, pos_step, size_step, color_step, temperature, steps_per_frame)
+    return AnnealConfig(color_space, sigma, pos_step, size_step, color_step, temperature, steps_per_frame, baseline_interval)
 end
 
 # ── Coverage map ─────────────────────────────────────────────────────────────
@@ -60,6 +62,15 @@ function _update_coverage!(
     row_range = clamp(rect.min_y + 1, 1, height):clamp(rect.max_y, 1, height)
     col_range = clamp(rect.min_x + 1, 1, width):clamp(rect.max_x, 1, width)
     @view(coverage_map[row_range, col_range]) .+= delta
+end
+
+# ── Block area ────────────────────────────────────────────────────────────────
+
+# Pixel area of a rectangle clipped to the image bounds.
+function _block_area(rect::Geometry.Rectangle, height::Int, width::Int)::Int
+    row_range = clamp(rect.min_y + 1, 1, height):clamp(rect.max_y, 1, height)
+    col_range = clamp(rect.min_x + 1, 1, width):clamp(rect.max_x, 1, width)
+    return length(row_range) * length(col_range)
 end
 
 # ── Objective ─────────────────────────────────────────────────────────────────
@@ -101,6 +112,22 @@ function total_reward(
     sigma::Float64,
     )::Float64
     return sum(-block_cost(r, csi, coverage_map, sigma) for r in rectangles)
+end
+
+# Baseline reward per block-pixel: total reward divided by total block area
+# (counting overlapping pixels once per block). Used to give each pixel an
+# opportunity cost so that blocks neither greedily expand nor shrink.
+function compute_baseline(
+    rectangles::Vector{Geometry.Rectangle},
+    csi::Color.ColorSpaceImage,
+    coverage_map::Matrix{Int},
+    sigma::Float64,
+    )::Float64
+    height = size(csi.data, 2)
+    width  = size(csi.data, 3)
+    T = total_reward(rectangles, csi, coverage_map, sigma)
+    A = sum(_block_area(r, height, width) for r in rectangles)
+    return A > 0 ? T / A : 0.0
 end
 
 # ── Jitter ────────────────────────────────────────────────────────────────────
@@ -162,14 +189,18 @@ function anneal_step!(
     config::AnnealConfig,
     coverage_map::Matrix{Int},
     min_x::Int, max_x::Int, min_y::Int, max_y::Int,
+    baseline::Float64 = 0.0,
     )::Int
     idx  = Random.rand(1:length(rectangles))
     rect = rectangles[idx]
+    height, width = size(coverage_map)
 
     _update_coverage!(coverage_map, rect, -1)
-    old_cost = block_cost(rect, csi, coverage_map, config.sigma)
+    old_cost = block_cost(rect, csi, coverage_map, config.sigma) +
+               baseline * _block_area(rect, height, width)
     saved    = _jitter!(rect, min_x, max_x, min_y, max_y, config)
-    new_cost = block_cost(rect, csi, coverage_map, config.sigma)
+    new_cost = block_cost(rect, csi, coverage_map, config.sigma) +
+               baseline * _block_area(rect, height, width)
 
     delta  = new_cost - old_cost
     accept = delta <= 0 ||

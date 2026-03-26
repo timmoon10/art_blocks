@@ -287,10 +287,12 @@ function anneal!(plotter::Plotter, config::Anneal.AnnealConfig = Anneal.AnnealCo
         println("Paused:            ", is_paused)
         println("Rectangles:        ", length(plotter.rectangles))
         println("Total reward:      ", round(Anneal.total_reward(plotter.rectangles, obj_csi, coverage_map, config.sigma), digits=2))
+        println("Baseline:          ", round(baseline, digits=6))
         println("Color space:       ", Color.colorspace_label(obj_csi))
         println("Sigma:             ", config.sigma)
         println("Temperature:       ", config.temperature)
         println("Steps/frame:       ", config.steps_per_frame)
+        println("Baseline interval: ", config.baseline_interval > 0 ? string(config.baseline_interval) : "disabled")
         println("Position step:     ", config.pos_step)
         println("Size step:         ", config.size_step)
         println("Color step:        ", config.color_step)
@@ -314,6 +316,9 @@ function anneal!(plotter::Plotter, config::Anneal.AnnealConfig = Anneal.AnnealCo
         elseif command == "reset"
             Geometry.reset!(plotter.rectangles, 0, max_x, 0, max_y)
             Anneal.rebuild_coverage_map!(coverage_map, plotter.rectangles)
+            baseline = config.baseline_interval > 0 ?
+                Anneal.compute_baseline(plotter.rectangles, obj_csi, coverage_map, config.sigma) : 0.0
+            step_count = 0
             for (rect, obs, cobs) in zip(plotter.rectangles, coord_obs, color_obs)
                 obs[]  = rect_coords(rect)
                 cobs[] = GLMakie.RGBAf(rect.color..., rect.alpha)
@@ -339,6 +344,10 @@ function anneal!(plotter::Plotter, config::Anneal.AnnealConfig = Anneal.AnnealCo
         end
     end
 
+    baseline   = config.baseline_interval > 0 ?
+        Anneal.compute_baseline(plotter.rectangles, obj_csi, coverage_map, config.sigma) : 0.0
+    step_count = 0
+
     last_frame_time = time()
     while isopen(screen) && loop_active[]
 
@@ -346,9 +355,13 @@ function anneal!(plotter::Plotter, config::Anneal.AnnealConfig = Anneal.AnnealCo
         if now - last_frame_time >= plotter.frame_time
             if !is_paused
                 for _ in 1:config.steps_per_frame
+                    step_count += 1
+                    if config.baseline_interval > 0 && step_count % config.baseline_interval == 0
+                        baseline = Anneal.compute_baseline(plotter.rectangles, obj_csi, coverage_map, config.sigma)
+                    end
                     Anneal.anneal_step!(
                         plotter.rectangles, obj_csi, config, coverage_map,
-                        0, max_x, 0, max_y,
+                        0, max_x, 0, max_y, baseline,
                     )
                 end
                 for (rect, obs, cobs) in zip(plotter.rectangles, coord_obs, color_obs)
